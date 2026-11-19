@@ -1,0 +1,17 @@
+{
+  "repository": "https://github.com/dadadadawjb/r3kit",
+  "commit": "95ce4caf1cb2a457b65264ba57981dc54ac6daf4",
+  "changes": "Only imports namespaced under camera_calibration.reference_r3kit; empty package initializers. Calibration logic unchanged.",
+  "original_sha256": {
+    "__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "algos/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "utils/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "utils/transformation.py": "4bd9934b57fa7169f64d91b36ae483410e3f98ee0e401e5beb4bbfe5b600e821",
+    "algos/calib/handeye.py": "bd2eb58f0c2e8b65be11b2e535e1b7034a8be4bbb332ff7f0cba7a2970a18763",
+    "algos/calib/aruco.py": "69cf222351e6d181c9bd71920aed01e37047c08f6244d132defe6914bc5321f3",
+    "algos/calib/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "algos/calib/utils.py": "34d4a8f801919cf1c46d5ca3367a7ab66c69de66094a8bfda39d9651f40607ed",
+    "algos/calib/chessboard.py": "ac9dfc1820721936e6a49a96caba3f2312057d594548178009cc6390e4cb10dd",
+    "algos/calib/config.py": "50d42036c3c5f7cfc241c79b52e48eaf97d15c47911d9715faa72008eb5fe3a6"
+  }
+}

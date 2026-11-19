@@ -1,0 +1,805 @@
+{
+  "schema_version": "1.1",
+  "status": "implemented_mvp_read_only_hardware_verified",
+  "title": "camera_calibration：单 ArUco 标定方案与原方法对照",
+  "date": "2026-11-18",
+  "proposed_project_name": "camera_calibration",
+  "package_name": "camera_calibration",
+  "constraints": {
+    "camera": "D415，固定桌面第三视角",
+    "working_distance_m": [
+      0.6,
+      1
+    ],
+    "target": "仅使用现有 DICT_6X6_1000 / ID 0 标记；不得依赖第二块板",
+    "marker_side_m": 0.08,
+    "marker_size_note": "用户已确认标记边长为 80 mm；配置固定 Lx=Ly=0.08 m，不再作为待确认项。",
+    "accuracy_goal_mm": 1,
+    "accuracy_definition": "在预定义工作区域及独立参考测点上报告三维欧氏误差，目标 max <= 1 mm；同时报告 RMS / P95 / XYZ 和参考测量不确定度。不能由有限测点推断整个空间必然达标。",
+    "hardware_actions": "record_trajectory/check_devices read only; auto_calibrate --execute explicitly enables NRT joint-position replay of a recorded path and stops on completion/interruption.",
+    "no_new_board_required": true
+  },
+  "decision": "用实际机器人多姿态提供几何冗余：完整相机模型 → 静止采集 → 四角质量估计 → IPPE 双候选 → 跨姿态多初值 → 共享 X/Y 的像素级稳健优化 → 可观测性与独立验收。",
+  "conventions": {
+    "transform": "T_A_B maps p_B to p_A; column vectors; p_A = R_A_B p_B + t_A_B",
+    "frames": {
+      "B": "机器人 base；只有已知 base/world 关系时使用此名",
+      "W": "Flexiv world",
+      "E": "实际 flange，默认不使用可变 TCP",
+      "C": "原生 RGB optical",
+      "D": "原生 depth optical",
+      "M": "ID 0 标记中心"
+    },
+    "variables": {
+      "X": "T_B_C",
+      "Y": "T_E_M",
+      "G_i": "T_B_E,i = T_B_W @ T_W_E,i",
+      "C_i": "T_C_M,i，仅用于初始化和诊断"
+    },
+    "closure": "G_i @ Y = X @ C_i",
+    "point_prediction": "p_C_ij = inverse(X) @ G_i @ Y @ P_M_j",
+    "marker_order": "[[-Lx/2,+Ly/2,0],[+Lx/2,+Ly/2,0],[+Lx/2,-Ly/2,0],[-Lx/2,-Ly/2,0]]；与解码后的 canonical corner order 配对，不按屏幕 x/y 重排。",
+    "square_solver": "只有经确认的正方形才用 SOLVEPNP_IPPE_SQUARE；若实测长宽不同，用 SOLVEPNP_IPPE + 对应矩形几何。",
+    "units": "内部 float64、m、rad；像素 px；界面和报告可转换为 mm、deg。",
+    "tangent": "右扰动 T <- T @ Exp([rx,ry,rz,tx,ty,tz])；旋转 rad、平移 m；协方差明确顺序、切空间和参考变换。",
+    "r3kit_mapping": "eye-to-hand: inv(result['g2c']) = X; inv(result['b2w']) = Y。",
+    "depth_mapping": "T_B_D = T_B_C @ T_C_D；SDK extrinsics.rotation 是 column-major。必须与 SDK 基向量变换对照。",
+    "legacy_marker_conversion": "旧 ArUco 模板原点在一角且 y 向下；新模板中心原点且 y 向上。对边长 L：T_oldMarker_newMarker 的 R=diag(1,-1,-1)，t=[L/2,L/2,0]。C_new=C_old @ T_old_new，Y_new=Y_old @ T_old_new，X 应不变；只导入原图重新检测时无需复用旧 PnP 位姿。"
+  },
+  "evidence": [
+    {
+      "id": "r3kit",
+      "year": "2026-04-18 仓库快照",
+      "url": "https://github.com/dadadadawjb/r3kit/blob/95ce4caf1cb2a457b65264ba57981dc54ac6daf4/r3kit/algos/calib/handeye.py",
+      "finding": "现有代码已有 robot-world/hand-eye 两阶段骨架。",
+      "adoption": "保留 Shah 基线及 legacy 数据导入；修正相机模型、命名、数据配对、评价边界。",
+      "title": "r3kit · HandEyeCalibor 源码"
+    },
+    {
+      "id": "ippe",
+      "year": "2014 IJCV / OpenCV 实现",
+      "url": "https://github.com/tobycollins/IPPE",
+      "finding": "小或远的平面目标可存在两个近似等价位姿，单帧重投影或平滑不能可靠消歧。",
+      "adoption": "保留两解；用多姿态共享刚体关系筛选初始化。此组合方案为本项目设计，不宣称论文已保证同一装置精度。",
+      "title": "Infinitesimal Plane-Based Pose Estimation"
+    },
+    {
+      "id": "tabb",
+      "year": "2017 / 2019 含勘误版",
+      "url": "https://arxiv.org/abs/1907.12425",
+      "finding": "RWHE 可直接优化相机重投影；该目标依赖初始化。",
+      "adoption": "先闭式初始化，再在原始角点上优化共享 X/Y；三维误差单独验证。",
+      "title": "Solving the Robot-World Hand-Eye(s) Calibration Problem with Iterative Methods"
+    },
+    {
+      "id": "edge2020",
+      "year": "2020 ICRA",
+      "url": "https://doi.org/10.1109/ICRA40945.2020.9197427",
+      "finding": "标记检测角点的定位质量、遮挡和边缘细化显著影响结果。",
+      "adoption": "建立角点细化对照，默认不重复堆叠两种细化；高级边缘方法进入后续实验，论文数值不移植为本机指标。",
+      "title": "Determining and Improving the Localization Accuracy of AprilTag Detection"
+    },
+    {
+      "id": "uncertainty",
+      "year": "2024 TRO（2023 online）",
+      "url": "https://publikationen.bibliothek.kit.edu/1000167305",
+      "finding": "机器人反馈有不确定性，重复精度不能代替绝对精度。",
+      "adoption": "MVP 明确将 G_i 视为已知；发现构型相关残差后，才研究带实测先验的机器人位姿修正。",
+      "title": "Uncertainty-Aware Hand–Eye Calibration"
+    },
+    {
+      "id": "nbv2023",
+      "year": "2023",
+      "url": "https://arxiv.org/abs/2303.06766",
+      "finding": "通过参数不确定度和信息增益选取下一姿态。原文是 eye-in-hand。",
+      "adoption": "借鉴信息选择原则，重新针对固定相机的 12 维模型推导；不直接复制其坐标公式。",
+      "title": "Next-Best-View Selection for Robot Eye-in-Hand Calibration"
+    },
+    {
+      "id": "nbv2025",
+      "year": "2025",
+      "url": "https://doi.org/10.1016/j.aei.2025.103432",
+      "finding": "将角点不确定性与姿态选择结合。",
+      "adoption": "先人工分层采集，后以数据雅可比和对 X 的边缘化信息推荐补采姿态。",
+      "title": "A data-efficient and general-purpose hand–eye calibration method for robotic systems using next best view"
+    },
+    {
+      "id": "wise",
+      "year": "2025 / 2026 IJRR",
+      "url": "https://arxiv.org/abs/2507.23045",
+      "finding": "可认证位姿级 RWHE 全局最优；需要清理异常值。",
+      "adoption": "离线求解器对照，非首版核心依赖；证书不能验证物理尺寸、镜头模型或真实毫米精度。",
+      "title": "A Certifiably Correct Algorithm for Generalized Robot-World and Hand-Eye Calibration"
+    },
+    {
+      "id": "edge2026",
+      "year": "2026 出版社在线记录",
+      "url": "https://www.sciencedirect.com/science/article/pii/S0031320326006485",
+      "finding": "小 AprilTag 的边缘定位与编码拓扑扩展特征是研究方向。",
+      "adoption": "仅作后续边缘/内部特征实验的线索；现物是 ArUco，未确认可直接迁移，未复现该论文。",
+      "title": "An integrated framework for enhancing small AprilTag pose accuracy under long-distance conditions"
+    },
+    {
+      "id": "realsense",
+      "year": "官方 SDK",
+      "url": "https://github.com/realsenseai/librealsense/blob/master/src/rs.cpp",
+      "finding": "Modified Brown-Conrady 的切向项与标准 Brown-Conrady 存在实现差异。",
+      "adoption": "按 model 枚举显式分派，并与部署版本 SDK 对照；缺失模型/系数不自动填零。",
+      "title": "librealsense · rs2_project_point_to_pixel"
+    },
+    {
+      "id": "flexiv",
+      "year": "官方 RDK",
+      "url": "https://devwebcom.flexiv.com/software/rdk/api/structflexiv_1_1rdk_1_1_robot_states.html",
+      "finding": "实际 flange_pose / tcp_pose 使用 world 系，平移 m、四元数 wxyz。",
+      "adoption": "直接读取官方 RDK 状态；部署版本决定 states() 是状态对象还是按 JointGroup 索引的字典。保存 flange_pose、时间戳与版本；无须另写正运动学。",
+      "title": "Flexiv RDK · RobotStates"
+    }
+  ],
+  "pipeline": [
+    {
+      "id": "camera",
+      "name": "确认测量模型",
+      "reason": "四角冗余有限，系统偏差不能靠多拍平均消失。",
+      "details": [
+        "保存实际 RGB profile 的 K、model、coeffs、分辨率、序列号、固件和 SDK 版本。",
+        "在原始图检测角点；PnP 前只将角点逆投影为归一化射线，K=I、D=0；最终残差仍在原始像素域计算。",
+        "首版支持经验证的 NONE、BROWN_CONRADY、MODIFIED_BROWN_CONRADY；其他模型明确拒绝或单独实现，不能回退成零畸变。",
+        "固定出厂 K/D 作为主线；只有单板时可用多视角做受约束内参核验，但不一次性释放内参、板尺度、机器人参数。"
+      ]
+    },
+    {
+      "id": "capture",
+      "name": "形成可重放的静止观测",
+      "reason": "运动模糊、滚动快门和异步采样不能留给求解器猜测。",
+      "details": [
+        "建议 40–60 个训练姿态加 12–20 个封存测试姿态；数量是起点，信息量检查决定是否补采。",
+        "覆盖 0.6/0.8/1.0 m、不同横向位置、倾角与非平行旋转轴；避免所有姿态正视或仅绕光轴旋转。",
+        "每姿态先确认反馈在整段采集窗口内稳定，再取得 10–20 个新 RGB 帧；保存所有原图、反馈流、帧序号与时钟域。",
+        "记录相机硬件时钟、host monotonic、接收区间、曝光；不直接减不同域时间戳。静止数据不能辨识时间偏移，因此首版不联合估计时间偏移。",
+        "留出返回同一锚点的重复姿态检测夹持变化/漂移；同一个物理姿态族不能跨训练与最终测试。"
+      ]
+    },
+    {
+      "id": "corners",
+      "name": "把四角当作带误差的测量",
+      "reason": "ID 正确不代表角点准确。",
+      "details": [
+        "只接受字典及 ID 0 匹配、四角完整、未出界且清晰的观测。保存原始检测角点和细化后角点。",
+        "比较 APRILTAG、SUBPIX 和 NONE 细化模式；默认只使用一种，禁止未经验证连续叠加。",
+        "对静止 burst 做稳健聚合，并给每角点估计正则化 2×2 协方差；保留误差下限，不能以 1/N 无限压低权重。",
+        "5–20 帧的时间抖动不代表绝对角点精度；不把所有帧当作独立机器人姿态，也不以重采样掩盖打印误差。",
+        "记录最短边像素数、模糊、饱和、边界余量等；阈值由部署分辨率和真实检测对照设定。"
+      ]
+    },
+    {
+      "id": "initialization",
+      "name": "保留双解并形成多初值",
+      "reason": "避免在每帧过早选择错误的平面分支。",
+      "details": [
+        "solvePnPGeneric(IPPE_SQUARE/IPPE) 保存最多两个正深度候选和原始像素重投影误差。",
+        "选择多组旋转多样的 4–6 姿态子集，各自枚举最多 2^6 个分支组合，分别用 Shah/Li 求初值。",
+        "按全训练集原始角点的稳健像素得分、正深度和几何合法性筛选，保留少量彼此不同的初值。",
+        "多初值分别联合优化；聚类最终 X/Y，比较代价和预测差异。近似同分但几何不同则标记 ambiguous 并补采，不伪称全局最优。",
+        "保留最小单帧误差分支 + Shah 作为可复现旧路线基线。"
+      ]
+    },
+    {
+      "id": "joint",
+      "name": "共享 12 维参数的稳健像素优化",
+      "reason": "多姿态约束应进入像素目标，而不是只对有噪声的 PnP 位姿做二次拟合。",
+      "details": [
+        "r_ij = u_ij - project(K,D, inverse(X) @ G_i @ Y @ P_j)。MVP 只优化 X/Y 共 12 维。",
+        "最小化 sum_i,j rho(r_ij^T Sigma_ij^-1 r_ij)，按角点二维残差整体稳健化。",
+        "用块 IRLS + SciPy least_squares(loss='linear') 实现二维 Huber；不能把逐分量 Huber 说成同一个目标。",
+        "使用右 SE(3) 扰动与明确的 m/rad 缩放；数值雅可比先与中心差分检查，后续才优化计算效率。",
+        "不将逐帧 PnP 残差与原始角点残差重复计作独立测量；不自由优化每帧板位姿或机器人位姿。"
+      ]
+    },
+    {
+      "id": "information",
+      "name": "检查参数是否被数据约束",
+      "reason": "可解、稳定、真实准确分别需要不同证据。",
+      "details": [
+        "使用按物理尺度归一化的白化数据雅可比，报告奇异值、数值秩和弱方向；先验正则项不计入数据可观测性。",
+        "通过 H_xx - H_xy pinv(H_yy) H_yx 消去安装位姿 Y，评估相机外参 X 的信息量；数值秩不足时不将正则化后的逆当作可信协方差。",
+        "后续 NBV 在已知可行范围内推荐提升弱方向的姿态；第一版输出文字指导和覆盖缺口，不自动驱动机械臂。",
+        "对姿态组/会话做 bootstrap，并传播到工作区域内的测试点；这是条件稳定性，不是实际精度真值。"
+      ]
+    },
+    {
+      "id": "validation",
+      "name": "独立验收并输出证据等级",
+      "reason": "同一块板仍可留出测试，但无法提供独立的绝对计量真值。",
+      "details": [
+        "训练集完成初始化、调参、拒绝规则确定；验证折用于选择，最终测试姿态封存至模型冻结。",
+        "测试像素必须由训练得到的 X/Y 与新 G_i 预测，不能再给测试帧独立拟合位姿来降低误差。",
+        "报告像素误差、闭环误差、重复标定变化、真实测点误差；没有独立参考时，物理精度状态必须是 unverified。",
+        "仅一个板不妨碍使用 TCP 探针、已知行程或已测几何参考，但这些是可选验收基准，不能假设现场已具备。",
+        "native depth 仅作单独诊断。RGB 与深度不一致不是独立真值；边缘/黑色区域无效深度须剔除并保留缺失率。"
+      ]
+    }
+  ],
+  "files": [
+    {
+      "path": "pyproject.toml",
+      "phase": "M0",
+      "purpose": "包定义、core/capture/test 依赖、pytest 路径；常用脚本独立放 scripts/",
+      "contract": "安装 camera_calibration；pytest testpaths=scripts/tests；不要求使用 fcal 命令",
+      "checks": "无 SDK 环境可安装并执行离线命令"
+    },
+    {
+      "path": "uv.lock",
+      "phase": "M1",
+      "purpose": "记录经 SDK 兼容验证的依赖版本",
+      "contract": "由包管理器生成；不得用未经验证的最新版本替代部署版本",
+      "checks": "全新环境复现"
+    },
+    {
+      "path": "README.md",
+      "phase": "M1",
+      "purpose": "安装、首次采集、离线求解、结果解读入口",
+      "contract": "明确单板约束与各精度状态",
+      "checks": "新使用者可按步骤回放"
+    },
+    {
+      "path": ".gitignore",
+      "phase": "M0",
+      "purpose": "排除会话图像、NPZ、大报告和本地序列号配置",
+      "contract": "保留最小合成 fixture 和脱敏配置模板",
+      "checks": "原始现场数据不会误提交"
+    },
+    {
+      "path": "configs/d415_rizon4r.yaml",
+      "phase": "M0",
+      "purpose": "设备、板几何、采集与求解配置",
+      "contract": "DICT_6X6_1000、ID 0、Lx=Ly=0.08 m（用户确认）；RDK 版本与 group、相机 profile、base/world 关系及随机种子显式保存",
+      "checks": "80 mm 在内部准确转换为 0.08 m；设备信息缺失时不以猜测值代替"
+    },
+    {
+      "path": "docs/design.md",
+      "phase": "M0",
+      "purpose": "统一说明原方法对照、数学、采集与验收；不预先拆成多篇小文档",
+      "contract": "解释本方案组合与文献原方法的区别；只需现有板；说明怎样确认停稳和新帧；像素一致性、重复性、物理精度分别定义",
+      "checks": "公式与代码契约一致；每步产生可核查元数据；无外部真值不写达标"
+    },
+    {
+      "path": "camera_calibration/models.py",
+      "phase": "M0",
+      "purpose": "配置、观测、结果类型及只读设备协议",
+      "contract": "CameraSpec、MarkerGeometry、PoseSample、CornerObservation、PoseHypothesis、CalibrationResult；形状/单位/frames 显式；validate_for_capture / validate_for_metric_solve；允许先采集后补实测几何；CameraSource.read / RobotStateSource.read；统一关闭语义与原始元数据",
+      "checks": "单位、形状、schema 回放；接受用户确认的 0.08 m；设备源可替换为离线回放"
+    },
+    {
+      "path": "camera_calibration/geometry.py",
+      "phase": "M0",
+      "purpose": "坐标变换、完整相机模型、80 mm 单标记几何",
+      "contract": "compose/inverse/exp/log/transform_points；所有函数遵守 T_A_B；project(points_C, model)->uv_raw；unproject(uv_raw)->normalized_xy；按 distortion model 分派；make_marker_points(Lx,Ly)，中心原点，canonical ID 顺序；square/generic IPPE 分派",
+      "checks": "闭环、逆变换、旋转合法性及扰动雅可比；对照部署 SDK，覆盖视野边缘；unsupported 不能变零畸变；四种图像旋转下编号一致；m/mm 错误被拒绝；改变板坐标约定不改变 X"
+    },
+    {
+      "path": "camera_calibration/devices/realsense.py",
+      "phase": "M1",
+      "purpose": "封装 RealSense 官方 SDK",
+      "contract": "保留原始流、全内参、时钟域、frame number、T_C_D；可选原生 depth",
+      "checks": "SDK 基向量对照外参展平顺序；profile 改变必须新建会话"
+    },
+    {
+      "path": "camera_calibration/devices/flexiv.py",
+      "phase": "M1",
+      "purpose": "封装 Flexiv 官方状态读取",
+      "contract": "RDK 1.x 支持 robot.states().flange_pose；官方当前 2.x 示例为 for group, states in robot.states().items(): states.flange_pose。记录部署版本，按指定机械臂 group 选择，不能默取第一项。 官方反馈 [x,y,z,qw,qx,qy,qz]，平移米、world 参考系；直接读取实际 flange_pose。 这是官方状态读取封装，不是新传感器或新运动学解算，不计作算法精度优势。采集器不调用 Enable/ServoOn 或运动命令。",
+      "checks": "wxyz 转换与 world/base 不混淆"
+    },
+    {
+      "path": "camera_calibration/dataset.py",
+      "phase": "M1",
+      "purpose": "会话读写、历史数据导入与结果导出",
+      "contract": "原子样本提交、JSONL 索引、NPZ、hash、schema 版本；拒绝按文件排序偷偷配对；需要用户声明旧位姿语义和 K/profile；缺失畸变标记 legacy_incomplete；旧板原点/法向约定显式转换；导入设备身份不得改成当前 Rizon。；导出矩阵+frames+units+profiles+marker/session hash+证据；检查运行分辨率及裁剪/缩放",
+      "checks": "中断写入、漏帧、乱序、重复 ID 不产生错配；禁止把缺失信息升级成已验证；world 未转换不命名 base；不丢掉未验证状态"
+    },
+    {
+      "path": "camera_calibration/capture.py",
+      "phase": "M1",
+      "purpose": "静止门控、触发与图像/反馈配对",
+      "contract": "结合完整 robot 状态窗口、时钟映射/不确定性及新帧检查；记录拒绝原因",
+      "checks": "旧缓存帧、运动中帧、时钟跳变被识别；静止不估时间偏移"
+    },
+    {
+      "path": "camera_calibration/detection.py",
+      "phase": "M1",
+      "purpose": "角点检测、短序列聚合与 IPPE 候选",
+      "contract": "返回原始与细化后 uv[4,2]；三种细化模式独立比较；均值/稳健估计、每角点正则化协方差、噪声下限、位姿总权重上限；先准确逆投影，K=I,D=0；输出候选、正深度、原始像素得分",
+      "checks": "ID 0、完整四角、边界和模糊异常 fixture；重复同一帧不凭空增加信息；小样本协方差不奇异；square order、矩形分派、两解保留与错误分支 fixture"
+    },
+    {
+      "path": "camera_calibration/solver.py",
+      "phase": "M2",
+      "purpose": "原方法基线、像素联合优化、双候选与可观测性",
+      "contract": "多样子集 4–6，枚举局部分支，训练全集像素评分，保留多个几何不同初值；8 维/姿态的原始残差；IRLS 块权重，冻结权重后线性 least_squares；float64、SE3 右扰动、参数缩放、多初值收敛记录、结果聚类；归一化 J 的 SVD；消去 Y 的 X 信息；建议而非机器人运动",
+      "checks": "不只取每帧最优；候选数量有界且固定 seed 可重放；二维整体旋转残差时权重不变；不重复计入 PnP 信息；无噪声恢复、含噪稳定、歧义不误报成功；重复/平移/单轴退化；先验不伪造数据秩"
+    },
+    {
+      "path": "camera_calibration/validation.py",
+      "phase": "M3",
+      "purpose": "留出误差、重复性、独立物理验证及可选深度诊断",
+      "contract": "读取封存 split；测试预测由冻结 X/Y 产生；独立参考可缺失；按 T_C_D 关联 RGB 区域；剔边/无效值；有外部距离才给 absolute Z error",
+      "checks": "burst 不泄漏、测试不重拟合、缺少参考状态 unverified；RGB 对照只算一致性；未对齐点云不误用 RGB 内参"
+    },
+    {
+      "path": "camera_calibration/report.py",
+      "phase": "M3",
+      "purpose": "本地报告与误差图",
+      "contract": "HTML/JSON：工作区域、姿态覆盖、原始像素误差、弱方向、异常值、三种状态",
+      "checks": "缺少数据省略对应图，不填零作为通过"
+    },
+    {
+      "path": "scripts/check_devices.py",
+      "phase": "M1",
+      "purpose": "检查 SDK、相机流、非夕实际状态与配置",
+      "contract": "只读；输出版本、group、flange_pose 与相机完整模型",
+      "checks": "可按 README 从项目根目录运行；算法只调用核心模块，离线脚本不导入硬件 SDK"
+    },
+    {
+      "path": "scripts/collect.py",
+      "phase": "M1",
+      "purpose": "正常使用的交互采集入口",
+      "contract": "调用 capture；原图和机器人反馈保留；无运动指令",
+      "checks": "可按 README 从项目根目录运行；算法只调用核心模块，离线脚本不导入硬件 SDK"
+    },
+    {
+      "path": "scripts/calibrate.py",
+      "phase": "M2",
+      "purpose": "正常使用的离线标定入口",
+      "contract": "检测并调用 solver；--method baseline|joint；保存配置、分组与结果",
+      "checks": "可按 README 从项目根目录运行；算法只调用核心模块，离线脚本不导入硬件 SDK"
+    },
+    {
+      "path": "scripts/evaluate.py",
+      "phase": "M3",
+      "purpose": "正常使用的验证与报告入口",
+      "contract": "冻结标定结果，在独立姿态上验证并生成报告与导出包",
+      "checks": "可按 README 从项目根目录运行；算法只调用核心模块，离线脚本不导入硬件 SDK"
+    },
+    {
+      "path": "scripts/tests/test_geometry_camera.py",
+      "phase": "M0",
+      "purpose": "坐标、角点和真实 SDK 投影对照",
+      "contract": "SDK 不在时跳过 SDK 专项，保留固定 golden vectors 的离线测试",
+      "checks": "覆盖 column-major、毫米混用、错误畸变模型"
+    },
+    {
+      "path": "scripts/tests/test_capture_dataset.py",
+      "phase": "M1",
+      "purpose": "真实风险的数据配对和恢复测试",
+      "contract": "fake 摄像头/机器人，帧乱序、掉帧、时钟域及中断写入",
+      "checks": "禁止无声错配"
+    },
+    {
+      "path": "scripts/tests/test_solver_synthetic.py",
+      "phase": "M2",
+      "purpose": "可辨识、退化、双解、离群的端到端数值测试",
+      "contract": "已知 X/Y、单个 80 mm 合成标记及固定种子；明确合成假设",
+      "checks": "无噪声恢复 + 异常样本 + 不确定结果状态"
+    },
+    {
+      "path": "scripts/tests/test_validation_export.py",
+      "phase": "M3",
+      "purpose": "防止指标泄漏及误标达标",
+      "contract": "同 burst 同组；冻结测试；无外部真值；错误 frame/profile",
+      "checks": "缺失真值不产生 physical passed"
+    },
+    {
+      "path": "scripts/tests/fixtures/generate_synthetic.py",
+      "phase": "M0",
+      "purpose": "生成小型可追溯合成数据",
+      "contract": "保存生成配置和种子；不提交大量现场图像",
+      "checks": "几何真值与投影可复算"
+    },
+    {
+      "path": "scripts/tests/compare_methods.py",
+      "phase": "M3",
+      "purpose": "固定数据上的方法对照",
+      "contract": "由同一 split 批量运行相机模型/角点/初值/目标函数组合",
+      "checks": "输出相同测试集合与所有失败，不只汇报最好一次"
+    },
+    {
+      "path": "scripts/tests/edge_refinement.py",
+      "phase": "M4",
+      "purpose": "单板边缘及内部图案增强研究",
+      "contract": "独立开关；保留 raw 基线；内部特征须来自图像而非 homography 插值",
+      "checks": "真实留出数据改善后才进入主流程"
+    },
+    {
+      "path": "scripts/tests/observability_probe.py",
+      "phase": "M0",
+      "purpose": "已运行的合成可观测性实验",
+      "contract": "80 mm 合成标记、12 参数；无硬件访问，不测试物理精度",
+      "checks": "固定种子下四组雅可比秩为 6、9、11、12"
+    }
+  ],
+  "data_contract": {
+    "manifest_json": [
+      "schema_version",
+      "session_id",
+      "config_hash",
+      "git_commit",
+      "versions",
+      "camera_serial",
+      "camera_profile",
+      "distortion_model",
+      "K",
+      "coeffs",
+      "depth_scale_m_per_unit",
+      "T_C_D",
+      "marker_geometry_and_measurement_source",
+      "robot_pose_frame",
+      "T_B_W_or_null",
+      "mount_id",
+      "environment",
+      "split_group_definition",
+      "robot_serial_and_model",
+      "robot_tool_and_world_frame_config_hash",
+      "T_B_W_provenance",
+      "rig_mount_epoch"
+    ],
+    "samples_jsonl": [
+      "sample_id",
+      "pose_group_id",
+      "anchor_id_or_null",
+      "frame_ids",
+      "camera_timestamp_and_domain",
+      "host_monotonic_intervals_ns",
+      "exposure_us",
+      "robot_state_indices",
+      "static_quality",
+      "raw_paths",
+      "checksums",
+      "rejection_reasons"
+    ],
+    "robot_npz": [
+      "host_monotonic_ns[N]",
+      "T_W_E[N,4,4]",
+      "joints[N,7]",
+      "tcp_or_flange_vel_if_available",
+      "wrench_if_available"
+    ],
+    "observations_npz": [
+      "sample_ids",
+      "canonical_corner_ids",
+      "uv_raw[N,4,2]",
+      "uv_refined[N,4,2]",
+      "uv_aggregated[N,4,2]",
+      "cov_corner[N,4,2,2]",
+      "pnp_candidates[N,2,4,4]",
+      "candidate_valid[N,2]",
+      "quality_fields"
+    ],
+    "result_json": [
+      "schema_version",
+      "T_B_C_or_T_W_C",
+      "T_E_M",
+      "T_B_D_or_T_W_D",
+      "from_frame",
+      "to_frame",
+      "units",
+      "tangent_convention",
+      "profile_hash",
+      "marker_geometry_hash",
+      "session_hash",
+      "used_and_rejected_pose_ids",
+      "initialization_candidates",
+      "metrics_train_validation_test_separate",
+      "data_rank",
+      "weak_directions",
+      "uncertainty_assumptions",
+      "workspace_validated",
+      "status_solve",
+      "status_internal_validation",
+      "status_physical_accuracy"
+    ],
+    "status_semantics": {
+      "status_solve": [
+        "ok",
+        "degenerate",
+        "ambiguous",
+        "failed"
+      ],
+      "status_internal_validation": [
+        "passed",
+        "failed",
+        "not_run"
+      ],
+      "status_physical_accuracy": [
+        "passed",
+        "failed",
+        "unverified"
+      ]
+    },
+    "serialization": "JSON UTF-8 / NPZ float64 allow_pickle=False / RGB PNG。原始样本不可覆盖；derived/runs 按配置哈希和 run_id 追加。原子写入成功后才提交样本索引。",
+    "split": "姿态族或会话分组切分；burst 内所有帧必须同组；最终测试不参与剔点规则、分支选择、初值选择或阈值调参。",
+    "outliers": "图像质量预检规则提前固定；模型相关训练异常值保留原因。最终测试失败点计入失败率，不能悄悄删除。",
+    "session_compatibility": "只有相机、机器人、参考坐标和刚性安装都兼容的会话才能共享 X/Y。板重装后 Y 改变，MVP 分开求解；相机移动后 X 改变。Angler/URDF 旧数据可用于回放算法，不可作为 Rizon4R 的物理外参。"
+  },
+  "commands": [
+    {
+      "name": "python scripts/check_devices.py --config configs/d415_rizon4r.yaml",
+      "input": "设备与配置",
+      "output": "官方 SDK 与实际状态诊断"
+    },
+    {
+      "name": "python scripts/collect.py --config ... --session ...",
+      "input": "静止姿态与操作者触发",
+      "output": "原图、完整内参、机器人反馈"
+    },
+    {
+      "name": "python scripts/calibrate.py --session ... --method baseline",
+      "input": "固定训练集",
+      "output": "原方法两阶段基线"
+    },
+    {
+      "name": "python scripts/calibrate.py --session ... --method joint",
+      "input": "同一训练集",
+      "output": "像素联合优化结果与候选诊断"
+    },
+    {
+      "name": "python scripts/evaluate.py --run ...",
+      "input": "封存测试与可选物理参考",
+      "output": "验证报告及带状态外参包"
+    },
+    {
+      "name": "python scripts/tests/compare_methods.py --session ...",
+      "input": "固定数据与公平对照配置",
+      "output": "逐项收益、失败率与重复性对照"
+    }
+  ],
+  "milestones": [
+    {
+      "id": "M0",
+      "name": "几何与数据契约",
+      "gate": "变换方向、角点顺序、单位、投影对照、退化检测通过；未知实物参数保持显式缺失。"
+    },
+    {
+      "id": "M1",
+      "name": "静止采集与旧路线基线",
+      "gate": "一组真实样本可离线重复检测和求解；SDK 仅存在于设备适配器；采集失败可恢复且不配错图像/位姿。"
+    },
+    {
+      "id": "M2",
+      "name": "双候选与联合优化",
+      "gate": "已知真值合成数据、含错分支和离群样本通过；每个初值和剔除原因可追溯。"
+    },
+    {
+      "id": "M3",
+      "name": "可观测性与验收报告",
+      "gate": "训练/测试隔离；退化或歧义不能被标为成功；无外部参考绝不输出毫米达标。"
+    },
+    {
+      "id": "M4",
+      "name": "有条件的性能改进",
+      "gate": "只有冻结数据上的独立指标改善，才接受内参微调、边缘增强、机器人不确定性模型或 NBV。"
+    }
+  ],
+  "experiments": [
+    {
+      "name": "模型一致性",
+      "comparison": "完整 SDK 模型 vs 明确标记为 legacy 的零畸变基线",
+      "control": "同一份 raw 数据；只改变投影模型"
+    },
+    {
+      "name": "角点细化",
+      "comparison": "APRILTAG vs SUBPIX vs NONE",
+      "control": "同一 raw 图；以留出机器人约束重投影与稳定性评估，不只看每帧 PnP 残差"
+    },
+    {
+      "name": "初始化",
+      "comparison": "单分支 Shah vs 多分支多初值",
+      "control": "同一角点、同一数据划分、固定随机种子"
+    },
+    {
+      "name": "优化目标",
+      "comparison": "位姿级基线 vs 共享 X/Y 的像素优化",
+      "control": "同一初值；同时保留原像素单位指标与物理测点指标"
+    },
+    {
+      "name": "采样信息",
+      "comparison": "重复/仅平移/单轴旋转/多轴旋转",
+      "control": "报告 pose 数、角点质量及数据秩，不将样本数当信息量"
+    },
+    {
+      "name": "稳定性",
+      "comparison": "至少三次独立采集与标定，固定夹具；重装另作为独立实验",
+      "control": "相同工作区域；区分 X 的变化与新 Y，记录 mount_id"
+    }
+  ],
+  "extensions": [
+    {
+      "name": "单板内参微调",
+      "trigger": "原始像素残差呈稳定空间结构，且多区域/多倾角观测充分",
+      "rule": "先只开放 fx/fy/cx/cy 的受约束增量并使用测量先验；数据雅可比和封存验证通过后才扩展。板尺度、机器人偏置不能同时无约束释放。"
+    },
+    {
+      "name": "边缘或内部图案特征",
+      "trigger": "四角定位噪声成为经实验确认的瓶颈",
+      "rule": "先研究边缘定位后求角点；若使用内部编码交点，必须建立实物拓扑与角点类型、遮挡、相关性模型。不得把同一 homography 插值出来的点当新观测。"
+    },
+    {
+      "name": "机器人位姿误差模型",
+      "trigger": "残差随机械臂构型或负载变化，且有足够独立验证与可信先验",
+      "rule": "使用有物理先验的 errors-in-variables / 运动学参数模型。自由逐帧修正会吸收外参误差，MVP 禁止。"
+    },
+    {
+      "name": "深度辅助",
+      "trigger": "RGB 单独基线稳定，原生深度偏差已独立测定",
+      "rule": "首版仅诊断；后续融合需显式深度偏差与不确定度，不将同源视觉预测当真值。"
+    },
+    {
+      "name": "可认证 RWHE",
+      "trigger": "需要额外排查位姿级求解局部极值",
+      "rule": "可选离线比较，不将最优性证书解读为外参物理精度保证。"
+    }
+  ],
+  "technology": {
+    "core": "Python（具体次版本取 SDK 兼容交集）+ NumPy + SciPy + OpenCV-contrib；固定并记录经验证版本。",
+    "hardware_dependencies": "pyrealsense2 与 Flexiv RDK 延迟导入；离线 solve/test 不依赖设备 SDK。",
+    "packaging": "项目和 Python 包均命名 camera_calibration；核心模块集中在 camera_calibration/，常用入口在 scripts/，所有开发测试与研究对照在 scripts/tests/。SDK 延迟导入。",
+    "tests": "pytest scripts/tests；所有自用测试、合成实验、消融比较均在 scripts/tests/；首版不拆顶层 tests/ 与 experiments/。",
+    "migration": "r3kit 作为数据兼容和参考实现；不修改上游，不继承省略畸变或含糊 b2g/g2c 的内部接口。"
+  },
+  "public_interfaces": [
+    "CameraModel.project(points_C[N,3]) -> uv_raw[N,2]",
+    "CameraModel.unproject(uv_raw[N,2]) -> normalized_xy[N,2]",
+    "detect(image, detector_config) -> CornerObservation | Rejection",
+    "aggregate_burst(frames, robot_window) -> PoseObservation",
+    "pnp_candidates(observation, camera_model, marker_geometry) -> list[PoseHypothesis]",
+    "initialize(train_observations, solver_config) -> list[CalibrationSeed]",
+    "solve(train_observations, seeds, frozen_camera, frozen_marker) -> CalibrationResult",
+    "evaluate(result, sealed_test, optional_independent_references) -> ValidationReport",
+    "export(result, validation, output_frame) -> CalibrationBundle"
+  ],
+  "dependency_rules": [
+    "scripts/ 只处理参数与流程调用；camera_calibration/ 核心函数独立于脚本；scripts/tests/ 可离线调用相同核心。",
+    "devices 直接封装官方相机/机器人 SDK；capture 负责停稳与配对，dataset 负责读写。无需自行实现机器人正运动学。",
+    "vision 仅生成图像测量和初始化候选；最终优化使用原始像素域而不是候选位姿误差。",
+    "validate 不可更新 X/Y、内参、板尺寸或用测试误差选择分支；需要模型选择时仅使用训练内验证折。",
+    "export 不能丢弃坐标、单位、profile 和证据状态；变换可诊断导出，但 failed/ambiguous 不得成为部署默认标定。",
+    "常规 __init__.py 随包目录创建；文件清单列出有职责的文件，不用空占位模块宣称功能已完成。"
+  ],
+  "noise_model": {
+    "image": "首版每角点 2×2 协方差是近似；不假设同帧四角或同 burst 独立。权重上限、噪声下限与姿态组 bootstrap 抑制过度自信。",
+    "robot": "MVP 将 actual G_i 当作已知输入；条件协方差不包括未知运动学系统偏差。",
+    "systematic": "板尺寸、K/D、夹具漂移不会被更多重复帧平均掉。没有实测先验时仅做敏感性扫描，不给虚假的完整置信区间。",
+    "scale": "先固定实测板几何。利用机器人米制运动联合估板尺度虽可研究，但依赖运动激励与机器人尺度可信度，非首版默认。"
+  },
+  "required_before_real_metric_run": [
+    "相机实际流、分辨率、畸变枚举与完整系数。",
+    "记录部署 RDK 版本；直接读取官方 flange_pose，保存其 frame、实际状态及 world/base 关系。",
+    "明确任务评价点及工作区域；若要声称物理 ≤1 mm，提供独立参考及其不确定度。"
+  ],
+  "flexiv_api": {
+    "source": "https://github.com/flexivrobotics/flexiv_rdk/blob/main/example_py/basics1_display_robot_states.py",
+    "manual": "https://www.flexiv.com/software/rdk/manual/v2.x/robot_states.html",
+    "initialization": "robot = flexivrdk.Robot(robot_sn)",
+    "read": "RDK 1.x 支持 robot.states().flange_pose；官方当前 2.x 示例为 for group, states in robot.states().items(): states.flange_pose。记录部署版本，按指定机械臂 group 选择，不能默取第一项。",
+    "pose": "官方反馈 [x,y,z,qw,qx,qy,qz]，平移米、world 参考系；直接读取实际 flange_pose。",
+    "scope": "这是官方状态读取封装，不是新传感器或新运动学解算，不计作算法精度优势。采集器不调用 Enable/ServoOn 或运动命令。"
+  },
+  "method_comparison": {
+    "headline": "原方法已经联合求 X/Y；新增核心是把机器人刚体关系直接放入像素目标。尚无本机实测增益。",
+    "old_flow": "每张图四角 → 每张图标记位姿 C_i → calibrateRobotWorldHandEye → X/Y",
+    "new_flow": "原方法/多候选产生 X/Y 初值 → 用 X^-1 G_i Y 预测每张图的四角 → 联合调整 X/Y",
+    "unchanged": "同一个 80 mm ArUco；同一组机器人反馈；相机固定；同样求两个固定刚体变换。多姿态本来也是原方法要求。",
+    "improvements": [
+      {
+        "name": "完整畸变模型",
+        "kind": "实现修正",
+        "old": "opt_distortion=False 时旧 ArUco 代码固定零畸变。",
+        "new": "使用实际流的 K/model/coeffs。",
+        "benefit": "存在未处理畸变时，可减少随图像位置变化的系统偏差。",
+        "limit": "实际畸变接近零或图像已正确校正时，这一项收益可能很小。"
+      },
+      {
+        "name": "像素级联合优化",
+        "kind": "主要算法变化",
+        "old": "手眼求解只接收独立拟合的 C_i，没有直接利用原始角点残差及其不确定性。",
+        "new": "共享 X/Y 预测全部图像角点；相机与机器人几何在同一个目标内约束。",
+        "benefit": "可减少单帧位姿不稳定和误差权重失真的影响，特别适用于小平面标记。",
+        "limit": "依赖初值和正确模型；没有普遍优于所有带协方差位姿算法的保证，训练误差下降不等于物理精度改善。"
+      },
+      {
+        "name": "双候选与多初值",
+        "kind": "初始化可靠性",
+        "old": "每帧得到一个最终位姿，没有显式保留平面两个候选。",
+        "new": "保留 IPPE 双候选，按跨姿态共享几何评价。",
+        "benefit": "存在平面歧义时可降低选错分支的风险。",
+        "limit": "不能凭空增加图像信息；仍可能多解，必须报告歧义。"
+      },
+      {
+        "name": "数据质量与可观测性",
+        "kind": "采集与诊断",
+        "old": "多姿态同样是原方法前提；缺少系统的弱方向与分组检验。",
+        "new": "检查停稳、角点质量、姿态覆盖和弱方向；独立留出评价。",
+        "benefit": "发现采得很多但约束不足、或结果不稳定的情况。",
+        "limit": "检测退化和增加报告本身不提高精度；需要真实补采或改善观测。"
+      }
+    ],
+    "fair_test": "同一份原图、机器人反馈和分组；依次或单独改变投影模型、像素目标、权重与候选选择；不得把换相机分辨率或换采样数据的收益归给算法。",
+    "success": "主看留出预测、重复标定与独立物理误差，完整报告失败；如果只有训练误差更低，不能认定更准。"
+  },
+  "implementation_status": {
+    "implemented": [
+      "manual trajectory recording",
+      "diverse sample selection",
+      "forward/reverse taught joint-path replay",
+      "stationary RGB bursts with target/actual poses",
+      "fixed-KD pose baseline",
+      "robust pixel refinement with IPPE multistart",
+      "observability and held-out validation",
+      "timestamp and camera serial output directories"
+    ],
+    "hardware_verified": {
+      "robot": "Rizon4R-062115",
+      "rdk": "1.9.2",
+      "robot_software": "v3.11.1",
+      "camera": "104122061018",
+      "rgb": "1920x1080@8",
+      "read_only": true
+    },
+    "not_yet_verified": [
+      "real taught trajectory replay",
+      "physical calibration accuracy"
+    ],
+    "deferred": [
+      "advanced edge features",
+      "joint robot kinematic correction",
+      "next-best-view robot motion",
+      "native depth bias calibration"
+    ],
+    "current_user_guide": "README.md",
+    "current_implementation_notes": "docs/design.md",
+    "note": "Earlier file/interface lists below are research design history; actual source and README define the implemented workflow.",
+    "post_capture_filtering": "2026-11-19: select from robot poses regardless of teaching image visibility; capture all planned raw bursts; close hardware; offline quality filtering; then solve only valid observations.",
+    "robot_only_teaching": "2026-11-19: record_trajectory connects only to Flexiv, saves robot states only, and displays elapsed time/state count. RealSense opens during automatic capture; legacy trajectory camera metadata remains optional."
+  },
+  "actual_files": [
+    "camera_calibration/__init__.py",
+    "camera_calibration/capture.py",
+    "camera_calibration/dataset.py",
+    "camera_calibration/detection.py",
+    "camera_calibration/devices/__init__.py",
+    "camera_calibration/devices/flexiv.py",
+    "camera_calibration/devices/realsense.py",
+    "camera_calibration/geometry.py",
+    "camera_calibration/models.py",
+    "camera_calibration/report.py",
+    "camera_calibration/solver.py",
+    "camera_calibration/trajectory.py",
+    "camera_calibration/validation.py",
+    "scripts/_common.py",
+    "scripts/auto_calibrate.py",
+    "scripts/calibrate.py",
+    "scripts/check_devices.py",
+    "scripts/evaluate.py",
+    "scripts/filter_samples.py",
+    "scripts/record_trajectory.py",
+    "scripts/select_samples.py",
+    "scripts/tests/compare_methods.py",
+    "scripts/tests/conftest.py",
+    "scripts/tests/observability_probe.py",
+    "scripts/tests/synthetic_demo.py",
+    "scripts/tests/test_geometry_camera.py",
+    "scripts/tests/test_post_capture_filtering.py",
+    "scripts/tests/test_replay_lifecycle.py",
+    "scripts/tests/test_robot_only_recording.py",
+    "scripts/tests/test_solver_synthetic.py",
+    "scripts/tests/test_trajectory_capture.py",
+    "scripts/tests/test_validation_dataset.py"
+  ],
+  "current_commands": [
+    "python scripts/record_trajectory.py",
+    "python scripts/auto_calibrate.py --session <session> --samples 40 --execute",
+    "python scripts/calibrate.py --run <capture> --method joint",
+    "python scripts/evaluate.py --result <result.json>",
+    "python scripts/filter_samples.py --run <capture>"
+  ]
+}

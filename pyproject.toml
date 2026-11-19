@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "camera_calibration"
+version = "0.1.0"
+description = "Single-marker eye-to-hand calibration with taught Flexiv trajectories"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.26,<3", "scipy>=1.13", "opencv-python>=4.10,<5", "PyYAML>=6"]
+
+[project.optional-dependencies]
+hardware = ["flexivrdk==1.9.2", "pyrealsense2==2.56.5.9235"]
+test = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+include = ["camera_calibration*"]
+
+[tool.setuptools.package-data]
+"camera_calibration.reference_r3kit" = ["LICENSE", "SOURCE.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["scripts/tests"]
+pythonpath = ["."]

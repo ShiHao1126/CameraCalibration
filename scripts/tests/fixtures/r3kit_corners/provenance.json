@@ -1,0 +1,76 @@
+{
+  "images": [
+    {
+      "file": "0027_001.png",
+      "source": "outputs/20261119_123853_897692_cam-104122061018_session/captures/20261119_130035_041666_cam-104122061018/samples/0027/images/001.png",
+      "sha256": "d6bdf7b3e4a1f206cfff8f66ae343a8ae1d2313bdb7e0ac9947645d81ec90585",
+      "expected_uv_r3kit": [
+        [
+          1068.3179931640625,
+          626.0841064453125
+        ],
+        [
+          872.5361938476562,
+          604.43896484375
+        ],
+        [
+          886.5952758789062,
+          427.3462829589844
+        ],
+        [
+          1070.94482421875,
+          450.6092834472656
+        ]
+      ]
+    },
+    {
+      "file": "0028_000.png",
+      "source": "outputs/20261119_123853_897692_cam-104122061018_session/captures/20261119_130035_041666_cam-104122061018/samples/0028/images/000.png",
+      "sha256": "1174b4304452cff2fbdbecf4c0cd685e0a51eb40a428df1b4383c915693aeffe",
+      "expected_uv_r3kit": [
+        [
+          1181.106201171875,
+          604.6817626953125
+        ],
+        [
+          970.1657104492188,
+          603.4779663085938
+        ],
+        [
+          974.5081787109375,
+          422.59686279296875
+        ],
+        [
+          1171.840576171875,
+          421.9365234375
+        ]
+      ]
+    },
+    {
+      "file": "0037_000.png",
+      "source": "outputs/20261119_123853_897692_cam-104122061018_session/captures/20261119_130035_041666_cam-104122061018/samples/0037/images/000.png",
+      "sha256": "35282f86b3232329367fd3592c46f385cce24f18bfff9f00aade791575c55303",
+      "expected_uv_r3kit": [
+        [
+          1454.75048828125,
+          429.9487609863281
+        ],
+        [
+          1298.237060546875,
+          409.23822021484375
+        ],
+        [
+          1215.640869140625,
+          272.33721923828125
+        ],
+        [
+          1363.6312255859375,
+          299.908447265625
+        ]
+      ]
+    }
+  ],
+  "note": "Unmodified original RGB images demonstrating the SUBPIX-only regression; no robot access required.",
+  "reference": "https://github.com/dadadadawjb/r3kit/blob/95ce4caf1cb2a457b65264ba57981dc54ac6daf4/r3kit/algos/calib/aruco.py",
+  "reference_execution": "Executed original class with original config, excluding only unavailable r3kit imports; no corner code was rewritten."
+}

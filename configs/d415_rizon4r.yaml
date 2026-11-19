@@ -1,0 +1,71 @@
+robot:
+  serial: Rizon4R-062115
+  rdk_version: 1.9.2
+  network_interfaces: []
+  reference_frame: world
+  T_base_world: null
+camera:
+  serial: '104122061018'
+  model: Intel RealSense D415
+  width: 1920
+  height: 1080
+  fps: 8
+  warmup_frames: 16
+marker:
+  dictionary: DICT_6X6_1000
+  id: 0
+  side_m: 0.08
+  refinement: R3KIT  # Original APRILTAG detector + 5x5 cornerSubPix.
+  min_side_px: 35
+  border_px: 8
+record:
+  robot_hz: 50
+  max_state_age_s: 0.25
+motion:
+  replay_speed_scale: 3.0  # Taught path time / 3; effective velocity ×3, acceleration ×9, jerk ×27.
+  max_velocity_rad_s: 0.12
+  max_acceleration_rad_s2: 0.20
+  max_jerk_rad_s3: 1.0
+  smooth_path_tolerance_rad: 0.001
+  max_record_gap_s: 0.20
+  max_record_step_rad: 0.06
+  path_simplification_rad: 0.001
+  max_waypoint_step_rad: 0.025
+  start_tolerance_rad: 0.02
+  waypoint_tolerance_rad: 0.0015
+  tracking_tolerance_rad: 0.03
+  waypoint_timeout_s: 20
+  operational_timeout_s: 30
+  poll_hz: 50
+capture:
+  settle_seconds: 1.0
+  settle_timeout_s: 20
+  max_joint_speed_rad_s: 0.003
+  max_joint_drift_rad: 0.0005
+  max_translation_drift_m: 0.0002
+  max_rotation_drift_deg: 0.05
+  fresh_frames: 3
+  burst_frames: 10
+  min_valid_frames: 6
+  corner_noise_floor_px: 0.15
+selection:
+  translation_scale_m: 0.10
+  rotation_scale_deg: 20
+  min_translation_m: 0.005
+  min_rotation_deg: 2
+solver:
+  min_train_poses: 10
+  test_fraction: 0.2
+  seed: 20261118
+  subset_size: 4
+  subset_count: 6
+  max_initializations: 6
+  max_nfev: 200
+  huber_delta: 2.5
+  irls_iterations: 4
+  rank_rtol: 0.000001
+  ambiguous_relative_cost: 0.02
+  ambiguous_translation_m: 0.002
+  ambiguous_rotation_deg: 0.2
+  test_rms_limit_px: 1.0
+outputs: outputs
